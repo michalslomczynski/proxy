@@ -14,9 +14,10 @@ import (
 type interceptor func([]byte, int) ([]byte, error)
 
 type Proxy struct {
-	Lst    net.Listener
-	Rmt    string
-	Itrcpt interceptor
+	lst    net.Listener
+	rmt    string
+	itcptr interceptor
+	bfsz   int
 }
 
 const (
@@ -30,35 +31,36 @@ var (
 	errShortWrite   = errors.New("short write")
 )
 
-func Init(localAddr, localPort, remoteAddr, remotePort string, itr interceptor) (*Proxy, error) {
+func Init(laddr, lport, raddr, rport string, bfsz int, itr interceptor) (*Proxy, error) {
 	p := Proxy{}
-	p.Rmt = fmt.Sprintf("%s:%s", remoteAddr, remotePort)
+	p.rmt = fmt.Sprintf("%s:%s", raddr, rport)
 
 	var err error
-	lcl := fmt.Sprintf("%s:%s", localAddr, localPort)
-	p.Lst, err = net.Listen("tcp", lcl)
+	lcl := fmt.Sprintf("%s:%s", laddr, lport)
+	p.lst, err = net.Listen("tcp", lcl)
 	if err != nil {
 		return nil, errors.Wrap(err, errListener)
 	}
 
-	p.Itrcpt = itr
+	p.itcptr = itr
+	p.bfsz = bfsz
 
 	return &p, nil
 }
 
-func (p *Proxy) ListenAndServe(bfsz int) {
+func (p *Proxy) ListenAndServe() {
 	for {
-		c, err := p.Lst.Accept()
+		c, err := p.lst.Accept()
 		if err != nil {
 			panic(err)
 		}
-		p.handleConn(c, bfsz)
+		p.handleConn(c)
 		c.Close()
 	}
 }
 
-func (p *Proxy) handleConn(src net.Conn, bfsz int) {
-	dst, err := net.Dial("tcp", p.Rmt)
+func (p *Proxy) handleConn(src net.Conn) {
+	dst, err := net.Dial("tcp", p.rmt)
 	if err != nil {
 		fmt.Println(errRemoteConn)
 		return
@@ -66,8 +68,8 @@ func (p *Proxy) handleConn(src net.Conn, bfsz int) {
 	defer dst.Close()
 
 	errc := make(chan error, 1)
-	go p.copyData(errc, src, dst, bfsz)
-	go p.copyData(errc, dst, src, bfsz)
+	go p.copyData(errc, src, dst)
+	go p.copyData(errc, dst, src)
 	switch <-errc {
 	case nil:
 		return
@@ -76,7 +78,7 @@ func (p *Proxy) handleConn(src net.Conn, bfsz int) {
 	}
 }
 
-func (p *Proxy) copyData(errc chan<- error, src, dst net.Conn, bfsz int) {
+func (p *Proxy) copyData(errc chan<- error, src, dst net.Conn) {
 	buf := bufio.NewReader(src)
 
 	var peeked []byte
@@ -93,11 +95,11 @@ func (p *Proxy) copyData(errc chan<- error, src, dst net.Conn, bfsz int) {
 	}
 
 	var err error
-	bb := make([]byte, bfsz)
+	bb := make([]byte, p.bfsz)
 	for {
 		nr, er := src.Read(bb)
 		if nr > 0 {
-			bb, ie := p.Itrcpt(bb, nr)
+			bb, ie := p.itcptr(bb, nr)
 			if ie != nil {
 				err = ie
 				break

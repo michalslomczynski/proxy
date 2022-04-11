@@ -20,9 +20,9 @@ func main() {
 		return nil, nil
 	}
 
-	px, err := proxy.Init(*laddr, *lport, *raddr, *rport, itcptr)
+	px, err := proxy.Init(*laddr, *lport, *raddr, *rport, *bfsz, itcptr)
 	if err != nil {
 		panic(err)
 	}
-	px.ListenAndServe(*bfsz)
+	px.ListenAndServe()
 }
